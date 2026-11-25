@@ -1,0 +1,24 @@
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+
+# Logs and runtime output
+*.log
+logs/
+nohup.out
+
+# Secrets (templates are committed)
+.env*
+!.env.example
+env.sh
+
+# Pipeline
+pipeline/cache/
+pipeline/.venv/
+__pycache__/
+*.py[cod]
+data/up/
+
+.DS_Store

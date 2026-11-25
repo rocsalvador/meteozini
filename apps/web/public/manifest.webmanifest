@@ -1,0 +1,12 @@
+{
+  "name": "meteozini",
+  "short_name": "meteozini",
+  "description": "El temps a Catalunya: mapa en directe, radar i previsió",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#201d1d",
+  "theme_color": "#201d1d",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

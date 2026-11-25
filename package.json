@@ -1,0 +1,21 @@
+{
+  "name": "meteozini",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @meteozini/web",
+    "dev:api": "npm run dev -w @meteozini/api",
+    "build": "npm run build -w @meteozini/api && npm run build -w @meteozini/web",
+    "start": "npm run start -w @meteozini/web",
+    "start:api": "npm run start -w @meteozini/api",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}
