@@ -1,8 +1,6 @@
 # meteozini
 
-Self-hosted, Catalan-language weather site for Catalonia. Forecast maps are generated locally
-from AROME HD; the web app is a pure client of our own data API, so nothing depends on a
-third-party Catalan weather site.
+Self-hosted, weather site for Catalonia.
 
 Next.js 15 · React 19 · TypeScript · Tailwind · MapLibre GL 5 · Hono · Python pipeline.
 
