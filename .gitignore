@@ -22,3 +22,7 @@ __pycache__/
 data/up/
 
 .DS_Store
+
+# Local agent skills
+.agents/
+skills-lock.json
