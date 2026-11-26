@@ -38,9 +38,14 @@ touched pages in light and dark theme and at ~390 px width.
 | `PORT` | `8787` | API |
 | `MODEL_GRID_STEP` / `MODEL_GRID_REFRESH_HOURS` | `0.25` / `6` | gridded models |
 | `OPEN_METEO_API_KEY` | — | paid Open-Meteo endpoint |
-| `CDSE_CLIENT_ID` / `CDSE_CLIENT_SECRET` | — | daily CLMS snow overlay |
+| `CDSE_CLIENT_ID` / `CDSE_CLIENT_SECRET` | — | daily CLMS snow overlay and the Sentinel-2 satellite source |
 
-Secrets live in the gitignored root `.env` (template: `.env.example`).
+Secrets live in the gitignored root `.env` (template: `.env.example`); the API loads that file
+itself when `CDSE_CLIENT_ID` is not already exported.
+
+The satellite tab of the map has a source selector: Meteosat (live, 10-minute frames, EUMETSAT)
+or Sentinel-2 (Copernicus, a 30-day mosaic served through the CDSE process API). Without CDSE
+credentials the Sentinel-2 source reports an empty frame set, so nothing is drawn.
 
 Basemap data: © OpenStreetMap · © OpenFreeMap · Límits © ICGC; relief © Mapterhorn; topo
 © OpenTopoMap (CC-BY-SA). Weather data from Open-Meteo, Météo-France (AROME), Meteocat/XEMA,

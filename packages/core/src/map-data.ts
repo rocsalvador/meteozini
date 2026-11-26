@@ -28,7 +28,6 @@ export type MapsResponse = {
 
 export type SatFrames = {
   bounds: Bounds;
-  cloud_bounds: Bounds;
   layers: Record<string, { slot: number; time: string; url: string }[]>;
 };
 

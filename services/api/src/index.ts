@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -16,6 +17,16 @@ import satellite from "./routes/satellite.js";
 import stations from "./routes/stations.js";
 import staticRoutes from "./routes/static.js";
 import weather from "./routes/weather.js";
+
+// The Copernicus satellite source needs the CDSE OAuth client, which lives in the
+// gitignored repo-root .env. Load it when it has not been exported already.
+if (!process.env.CDSE_CLIENT_ID) {
+  try {
+    process.loadEnvFile(fileURLToPath(new URL("../../../.env", import.meta.url)));
+  } catch {
+    /* no root .env — the Copernicus source will report itself unavailable */
+  }
+}
 
 const app = new Hono();
 
