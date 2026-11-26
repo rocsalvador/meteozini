@@ -4,7 +4,7 @@ import maplibregl, { type Map as MapLibreMap, type StyleSpecification } from "ma
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { LocateFixed, MountainSnow, SlidersHorizontal, X } from "lucide-react";
+import { LocateFixed, SlidersHorizontal, X } from "lucide-react";
 import { AppHeader } from "@/components/header";
 import { selectionStyle } from "@/components/selection";
 import {
@@ -43,9 +43,16 @@ import {
   type ModelGrid,
 } from "@/lib/model-grid";
 import { WindParticles } from "./wind-particles";
-import { LayersPanel, type MapOptions, variableIcon } from "./layers-panel";
+import {
+  LayersPanel,
+  satelliteViews,
+  type MapOptions,
+  type SatSource,
+  type SatView,
+  variableIcon,
+} from "./layers-panel";
 import { Timeline } from "./timeline";
-import { MountainLegend } from "@/components/mountain/mountain-legend";
+import { OverlayLegends } from "@/components/mountain/overlay-legends";
 import { ForecastPanel, type WeatherData } from "./forecast-panel";
 
 const SATELLITE_TILE =
@@ -214,7 +221,7 @@ export default function MapApp() {
   const mapRef = useRef<MapLibreMap | null>(null);
   const [map, setMap] = useState<MapLibreMap | null>(null);
 
-  const [mode, setMode] = useState<"models" | "obs" | "muntanya">("models");
+  const [mode, setMode] = useState<"models" | "obs">("models");
   const [obsTab, setObsTab] = useState<"stations" | "radar" | "satellite">("stations");
 
   const [mapModel, setMapModel] = useState("arome");
@@ -230,12 +237,13 @@ export default function MapApp() {
   const [avalancheZones, setAvalancheZones] = useState<AvalancheZoneCollection | null>(null);
   const [avalancheDanger, setAvalancheDanger] = useState<Record<string, number>>({});
   const [snowIndex, setSnowIndex] = useState<SnowCoverIndex | null>(null);
-  const [snowDay, setSnowDay] = useState(0);
 
   const [varArome, setVarArome] = useState("temperature");
   const [varObs, setVarObs] = useState("temperature");
   const [varRadar, setVarRadar] = useState("radar_rate");
-  const [varSat, setVarSat] = useState<"color" | "ir" | "vis">("color");
+  const [varSat, setVarSat] = useState<SatView>("color");
+  const [satSource, setSatSource] = useState<SatSource>("mtg");
+  const [satTick, setSatTick] = useState(0);
 
   const [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -256,22 +264,18 @@ export default function MapApp() {
     allow3d: true,
     avalancheSlopes: false,
     avalancheRisk: false,
-    snowCover: false,
     opacity: 0.78,
   });
   const setOptions = useCallback((patch: Partial<MapOptions>) => {
     setOptionsState((prev) => ({ ...prev, ...patch }));
   }, []);
 
-  const mountain = mode === "muntanya";
+  const obsSatellite = mode === "obs" && obsTab === "satellite";
   // Non-AROME models come from coarse Open-Meteo grids rendered client-side.
   const gridMode = mode === "models" && mapModel !== "arome";
   const gridModeRef = useRef(false);
   const modelGridRef = useRef<ModelGrid | null>(null);
   const indexRef = useRef(0);
-  // Basemap to restore when leaving the mountain view.
-  const prevBasemapRef = useRef<MapOptions["basemap"]>("clar");
-  const prevHillshadeRef = useRef(true);
 
   // 3D follows the camera: tilting away from zenith turns terrain on, levelling out turns it off.
   const terrainOnRef = useRef(false);
@@ -299,7 +303,7 @@ export default function MapApp() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
 
   const sourceKind: SourceKind =
-    mode === "muntanya" || mode === "models" ? "arome" : obsTab === "stations" ? "obs" : obsTab === "radar" ? "radar" : "sat";
+    mode === "models" ? "arome" : obsTab === "stations" ? "obs" : obsTab === "radar" ? "radar" : "sat";
   const variable =
     sourceKind === "arome" ? varArome : sourceKind === "obs" ? varObs : sourceKind === "radar" ? varRadar : null;
 
@@ -326,6 +330,21 @@ export default function MapApp() {
     if (sourceKind === "arome") return arome?.maps?.[varArome] ?? [];
     if (sourceKind === "obs") return obs?.maps?.[varObs] ?? [];
     if (sourceKind === "radar") return radar?.maps?.[varRadar] ?? [];
+    if (varSat === "snow") {
+      // Snow cover is a daily product: each published day becomes a frame, so the
+      // same time slider that walks the satellite images walks the snow days too.
+      if (!snowIndex?.available) return [];
+      const version = encodeURIComponent(snowIndex.generated_at);
+      return (snowIndex.days ?? []).map((day, i) => ({
+        variable: "snow",
+        hour: i,
+        timestamp: day.date,
+        valid_time: day.date,
+        filepath: `${day.image}?v=${version}`,
+        web_filepath: `${day.image}?v=${version}`,
+        web_bounds: snowIndex.bounds,
+      }));
+    }
     if (!sat) return [];
     return (sat.layers[varSat] ?? []).map((f) => ({
       variable: varSat,
@@ -336,9 +355,9 @@ export default function MapApp() {
       web_filepath: f.url,
       web_bounds: sat.bounds,
     }));
-  }, [gridMode, modelGrid, sourceKind, arome, obs, radar, sat, varArome, varObs, varRadar, varSat]);
+  }, [gridMode, modelGrid, sourceKind, arome, obs, radar, sat, snowIndex, varArome, varObs, varRadar, varSat]);
 
-  const frame = mountain ? null : frames[index] ?? null;
+  const frame = frames[index] ?? null;
   const currentModel = gridMode
     ? modelLabel(mapModel)
     : sourceKind === "arome"
@@ -347,7 +366,9 @@ export default function MapApp() {
         ? obs?.model
         : sourceKind === "radar"
           ? radar?.model
-          : "MTG · EUMETSAT";
+          : satSource === "s2"
+            ? "Sentinel-2 · Copernicus"
+            : "Meteosat · EUMETSAT";
 
   const sourceLabel = gridMode
     ? `${modelLabel(mapModel)} · ${modelGrid?.source ?? "Open-Meteo"}`
@@ -357,13 +378,17 @@ export default function MapApp() {
         ? "Estacions"
         : sourceKind === "radar"
           ? "Radar"
-          : "MTG · EUMETSAT";
+          : varSat === "snow"
+            ? "Neu al terra · CLMS"
+            : satSource === "s2"
+              ? "Sentinel-2 · Copernicus"
+              : "Meteosat · EUMETSAT";
 
   const variableLabel =
     sourceKind === "obs"
       ? "Estacions"
       : sourceKind === "sat"
-        ? { color: "Color", ir: "Infraroig", vis: "Visible" }[varSat]
+        ? { color: "Color", ir: "Infraroig", vis: "Visible", snow: "Neu al terra" }[varSat]
         : variable
           ? displayLabel(sourceKind, variable)
           : null;
@@ -446,12 +471,22 @@ export default function MapApp() {
   }, [gridMode, mapModel, varArome, modelGridTick]);
 
   useEffect(() => {
-    if (obsTab !== "satellite" || sat) return;
-    fetch("/up/api/satellite/frames")
+    if (obsTab !== "satellite") return;
+    let cancelled = false;
+    setSat(null);
+    fetch(`/up/api/satellite/frames?source=${satSource}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => d && setSat(d))
+      .then((d) => d && !cancelled && setSat(d))
       .catch(() => { });
-  }, [obsTab, sat]);
+    return () => {
+      cancelled = true;
+    };
+  }, [obsTab, satSource, satTick]);
+
+  // Keep the selected sub-view valid for the source: snow lives under Sentinel-2, IR/VIS under Meteosat.
+  useEffect(() => {
+    if (!satelliteViews(satSource).some((v) => v.id === varSat)) setVarSat("color");
+  }, [satSource, varSat]);
 
   useEffect(() => {
     if (mode !== "obs" || obsTab !== "stations" || stations.length) return;
@@ -463,7 +498,7 @@ export default function MapApp() {
 
   // Avalanche layers are lazy: only hit the ICGC endpoints when the user asks for them.
   useEffect(() => {
-    if (!mountain || !options.avalancheRisk) return;
+    if (!options.avalancheRisk) return;
     let cancelled = false;
     if (!avalancheZones) {
       fetch("/api/mountain/avalanche/zones")
@@ -485,11 +520,11 @@ export default function MapApp() {
     return () => {
       cancelled = true;
     };
-  }, [mountain, options.avalancheRisk, avalancheZones]);
+  }, [options.avalancheRisk, avalancheZones]);
 
-  // Daily CLMS snow-cover index: fetched lazily the first time the layer is enabled.
+  // Daily CLMS snow-cover index: fetched lazily the first time the snow view is chosen.
   useEffect(() => {
-    if (!mountain || !options.snowCover || snowIndex) return;
+    if (!obsSatellite || varSat !== "snow" || snowIndex) return;
     let cancelled = false;
     fetch("/api/mountain/snow")
       .then((r) => (r.ok ? r.json() : null))
@@ -500,29 +535,20 @@ export default function MapApp() {
     return () => {
       cancelled = true;
     };
-  }, [mountain, options.snowCover, snowIndex]);
+  }, [obsSatellite, varSat, snowIndex]);
 
-  const snowDays = snowIndex?.days ?? [];
-  const snowSelected = snowDays[snowDay] ?? null;
-  // PNGs are served `immutable`, so a day that gets re-published (empty -> data)
-  // needs a new URL; the index timestamp provides it.
-  const snowImage =
-    snowSelected && snowIndex
-      ? `${proxyUrl(snowSelected.image)}?v=${encodeURIComponent(snowIndex.generated_at)}`
-      : null;
+  const snowSelected = snowIndex?.days?.[index] ?? null;
 
-  // Start on the newest day that actually has snow in the published set.
+  // Reset the frame index when the frame set changes. Snow starts on the newest
+  // day that actually has snow in the published set instead of frame 0.
   useEffect(() => {
-    if (!snowIndex?.days?.length) return;
-    const i = snowIndex.days.findIndex((day) => day.date === snowIndex.date);
-    setSnowDay(i >= 0 ? i : snowIndex.days.length - 1);
-  }, [snowIndex]);
-
-  // Reset the frame index when the frame set changes.
-  useEffect(() => {
-    setIndex(defaultFrameIndex(frames, sourceKind === "sat" ? "sat" : sourceKind));
+    const newest =
+      varSat === "snow" && snowIndex?.days?.length
+        ? snowIndex.days.findIndex((day) => day.date === snowIndex.date)
+        : -1;
+    setIndex(newest >= 0 ? newest : defaultFrameIndex(frames, sourceKind === "sat" ? "sat" : sourceKind));
     setPlaying(false);
-  }, [frames, sourceKind]);
+  }, [frames, sourceKind, varSat, snowIndex]);
 
   // Value grid for readouts / labels.
   useEffect(() => {
@@ -1104,7 +1130,7 @@ export default function MapApp() {
     const layerId = "avalanche-slopes";
     if (map.getLayer(layerId)) map.removeLayer(layerId);
     if (map.getSource(sourceId)) map.removeSource(sourceId);
-    if (!mountain || !options.avalancheSlopes) return;
+    if (!options.avalancheSlopes) return;
     map.addSource(sourceId, {
       type: "raster",
       tiles: [icgcWmsTileUrl("class_pendents")],
@@ -1121,61 +1147,7 @@ export default function MapApp() {
       },
       map.getLayer("detail-buildings") ? "detail-buildings" : undefined
     );
-  }, [map, mountain, options.avalancheSlopes]);
-
-  // Copernicus daily snow cover, as a georeferenced image over the terrain.
-  useEffect(() => {
-    if (!map) return;
-    const sourceId = "snow-image";
-    const layerId = "snow-layer";
-    if (map.getLayer(layerId)) map.removeLayer(layerId);
-    if (map.getSource(sourceId)) map.removeSource(sourceId);
-    if (!mountain || !options.snowCover || !snowIndex?.available || !snowImage) return;
-
-    const b = snowIndex.bounds;
-    map.addSource(sourceId, {
-      type: "image",
-      url: snowImage,
-      coordinates: [
-        [b.west, b.north],
-        [b.east, b.north],
-        [b.east, b.south],
-        [b.west, b.south],
-      ],
-    });
-    const before = map.getLayer("avalanche-slopes")
-      ? "avalanche-slopes"
-      : map.getLayer("detail-buildings")
-        ? "detail-buildings"
-        : undefined;
-    map.addLayer(
-      {
-        id: layerId,
-        type: "raster",
-        source: sourceId,
-        // The PNG already carries the snow-fraction alpha; don't fade it twice.
-        paint: { "raster-opacity": 1, "raster-fade-duration": 0, "raster-resampling": "linear" },
-      },
-      before
-    );
-  }, [map, mountain, options.snowCover, snowIndex?.available, snowImage]);
-
-  // Slider: swap the image in place instead of recreating the layer (no flash).
-  useEffect(() => {
-    if (!map || !snowIndex?.available || !snowImage) return;
-    const src = map.getSource("snow-image") as maplibregl.ImageSource | undefined;
-    if (!src) return;
-    const b = snowIndex.bounds;
-    src.updateImage({
-      url: snowImage,
-      coordinates: [
-        [b.west, b.north],
-        [b.east, b.north],
-        [b.east, b.south],
-        [b.west, b.south],
-      ],
-    });
-  }, [map, snowIndex, snowImage]);
+  }, [map, options.avalancheSlopes]);
 
   // Daily BPA danger per zone, drawn over the weather raster and under roads/labels.
   useEffect(() => {
@@ -1185,7 +1157,7 @@ export default function MapApp() {
       if (map.getLayer(id)) map.removeLayer(id);
     }
     if (map.getSource(sourceId)) map.removeSource(sourceId);
-    if (!mountain || !options.avalancheRisk || !avalancheZones?.features.length) return;
+    if (!options.avalancheRisk || !avalancheZones?.features.length) return;
 
     map.addSource(sourceId, {
       type: "geojson",
@@ -1246,7 +1218,7 @@ export default function MapApp() {
       },
       before
     );
-  }, [map, mountain, options.avalancheRisk, avalancheZones, avalancheDanger, theme]);
+  }, [map, options.avalancheRisk, avalancheZones, avalancheDanger, theme]);
 
   // Overlay image + opacity.
   useEffect(() => {
@@ -1301,28 +1273,33 @@ export default function MapApp() {
       });
     };
     apply();
-    // Fade the coarse AROME raster as you zoom in so roads, trails and relief stay readable.
-    // Only the topographic basemap needs a lighter weather wash; 3D keeps the same colours as 2D.
-    const basemapFactor = options.basemap === "topo" ? 0.6 : 1;
-    const fade = (factor: number) => options.opacity * factor * basemapFactor;
-    map.setPaintProperty("wx-layer", "raster-opacity", [
-      "interpolate",
-      ["linear"],
-      ["zoom"],
-      9,
-      fade(1),
-      12,
-      fade(0.9),
-      14,
-      fade(0.6),
-      16,
-      fade(0.32),
-    ]);
+    if (sourceKind === "sat" && varSat === "snow") {
+      // The snow-fraction PNG carries its own alpha, so the weather wash settings would fade it twice.
+      map.setPaintProperty("wx-layer", "raster-opacity", 1);
+    } else {
+      // Fade the coarse AROME raster as you zoom in so roads, trails and relief stay readable.
+      // Only the topographic basemap needs a lighter weather wash; 3D keeps the same colours as 2D.
+      const basemapFactor = options.basemap === "topo" ? 0.6 : 1;
+      const fade = (factor: number) => options.opacity * factor * basemapFactor;
+      map.setPaintProperty("wx-layer", "raster-opacity", [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        9,
+        fade(1),
+        12,
+        fade(0.9),
+        14,
+        fade(0.6),
+        16,
+        fade(0.32),
+      ]);
+    }
     return () => {
       cancelled = true;
       if (retry) clearTimeout(retry);
     };
-  }, [map, frame, options.opacity, options.basemap, gridMode, modelGrid, index]);
+  }, [map, frame, options.opacity, options.basemap, gridMode, modelGrid, index, sourceKind, varSat]);
 
   // Observations / radar visibility + station data.
   useEffect(() => {
@@ -1542,22 +1519,8 @@ export default function MapApp() {
     );
   };
 
-  const selectMode = (next: "models" | "obs" | "muntanya") => {
+  const selectMode = (next: "models" | "obs") => {
     if (next === mode) return;
-    if (next === "muntanya") {
-      prevBasemapRef.current = options.basemap;
-      prevHillshadeRef.current = options.hillshade;
-      // The mountain view is about terrain and avalanches: shaded relief, no weather wash.
-      setOptions({ basemap: "relleu", hillshade: true, avalancheRisk: true, avalancheSlopes: false, snowCover: true });
-    } else if (mode === "muntanya") {
-      setOptions({
-        basemap: prevBasemapRef.current,
-        hillshade: prevHillshadeRef.current,
-        avalancheSlopes: false,
-        avalancheRisk: false,
-        snowCover: false,
-      });
-    }
     setMode(next);
   };
 
@@ -1574,6 +1537,20 @@ export default function MapApp() {
       : sourceKind === "obs"
         ? ["temperature", "precipitation", "wind_speed", "wind_gust", "humidity"]
         : ["temperature", "precipitation", "precip_accum", "wind_speed", "snow_precipitation", "snow_accum"];
+
+  // Mobile icon rail: satellite sub-views stand in for the weather variable shortcuts.
+  const quickMobileItems: { id: string; label: string; Icon: ReturnType<typeof variableIcon> }[] =
+    sourceKind === "sat"
+      ? satelliteViews(satSource).map((view) => ({ id: view.id, label: view.label, Icon: view.icon }))
+      : quickMobileVars.flatMap((v) => {
+          const meta = VAR_META[v];
+          return meta ? [{ id: v, label: meta.label, Icon: variableIcon(v) }] : [];
+        });
+  const quickMobileActive = (id: string) => (sourceKind === "sat" ? varSat === id : variable === id);
+  const selectQuickMobile = (id: string) => {
+    if (sourceKind === "sat") setVarSat(id as SatView);
+    else setVariableForSource(id);
+  };
 
   const legendVariable =
     sourceKind === "sat" || sourceKind === "obs"
@@ -1604,7 +1581,6 @@ export default function MapApp() {
               {([
                 ["models", "Models"],
                 ["obs", "Observacions"],
-                ["muntanya", "Muntanya"],
               ] as const).map(([m, label]) => (
                 <button
                   key={m}
@@ -1635,12 +1611,12 @@ export default function MapApp() {
               onClick={() => setLayersOpen(true)}
               aria-expanded={layersOpen}
               aria-haspopup="dialog"
-              aria-label="Capes i vista del mapa"
+              aria-label="Configuració del mapa"
               className="flex h-8 items-center gap-1.5 rounded px-2 hover:text-[color:var(--accent)]"
               style={{ color: "var(--muted-foreground)" }}
             >
               <SlidersHorizontal className="h-4 w-4" />
-              <span className="text-[11px] font-medium">Capes</span>
+              <span className="text-[11px] font-medium">Configuració</span>
             </button>
           </div>
         </div>
@@ -1658,48 +1634,34 @@ export default function MapApp() {
           </div>
         )}
 
-        {mountain && (
-          <MountainLegend
-            className="pointer-events-auto absolute bottom-20 left-2 z-30"
-            options={options}
-            setOptions={setOptions}
-            snowDays={snowDays}
-            snowDay={snowDay}
-            setSnowDay={setSnowDay}
-            snowEmpty={snowSelected?.empty ?? snowIndex?.empty}
-          />
-        )}
-
         <WindParticles
           map={map}
           url={sourceKind === "sat" ? null : windFieldUrl(frame ?? undefined)}
           bounds={frame?.web_bounds ?? null}
           enabled={
-            !mountain && !gridMode && options.windAnim && !terrain3d && !playing && sourceKind !== "sat" && sourceKind !== "radar"
+            !gridMode && options.windAnim && !terrain3d && !playing && sourceKind !== "sat" && sourceKind !== "radar"
           }
           frameKey={`${index}-${sourceKind}-${variable}`}
         />
 
         {/* Mobile quick variables */}
-        {!mountain && (sourceKind === "arome" || sourceKind === "radar") && (
+        {quickMobileItems.length > 0 && (
           <div
             className="pointer-events-auto absolute left-2 top-[calc(50%-28px)] z-30 flex -translate-y-1/2 flex-col gap-1.5 sm:hidden"
             role="radiogroup"
-            aria-label="Variables"
+            aria-label={sourceKind === "sat" ? "Imatge satèl·lit" : "Variables"}
           >
-            {quickMobileVars.map((v) => {
-              const meta = VAR_META[v];
-              if (!meta) return null;
-              const Icon = variableIcon(v);
-              const active = v === variable;
+            {quickMobileItems.map(({ id, label, Icon }) => {
+              const active = quickMobileActive(id);
               return (
                 <button
-                  key={v}
+                  key={id}
                   type="button"
                   role="radio"
                   aria-checked={active}
-                  aria-label={meta.label}
-                  onClick={() => setVariableForSource(v)}
+                  aria-label={label}
+                  title={label}
+                  onClick={() => selectQuickMobile(id)}
                   className="flex h-10 w-10 items-center justify-center rounded-xl border"
                   style={{
                     backgroundColor: active ? "var(--accent)" : "var(--background)",
@@ -1729,11 +1691,9 @@ export default function MapApp() {
                   {selected.name}
                 </span>
               )}
-              {!mountain && (
-                <span className="whitespace-nowrap font-mono">
-                  {variable && selected.value != null ? formatValue(variable, selected.value, VAR_META[variable]?.unit) : "—"}
-                </span>
-              )}
+              <span className="whitespace-nowrap font-mono">
+                {variable && selected.value != null ? formatValue(variable, selected.value, VAR_META[variable]?.unit) : "—"}
+              </span>
               <button
                 type="button"
                 onClick={openForecast}
@@ -1770,117 +1730,93 @@ export default function MapApp() {
           onClose={() => setForecast((f) => ({ ...f, open: false }))}
         />
 
-        {mountain ? (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 px-2 pb-[max(8px,env(safe-area-inset-bottom))] sm:px-3 sm:pb-3">
-            <div
-              className="pointer-events-auto mx-auto flex max-w-[620px] flex-wrap items-center justify-between gap-2 rounded-2xl border px-3 py-2"
-              style={{ backgroundColor: "var(--background)", borderColor: "var(--border)" }}
-            >
-              <span className="text-[12px]" style={{ color: "var(--muted-foreground)" }}>
-                Toca el mapa per seleccionar un punt i veure&apos;n la previsió.
-              </span>
-              <button
-                type="button"
-                onClick={() => setLayersOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[12px] font-semibold"
-                style={selectionStyle(layersOpen)}
-              >
-                <MountainSnow className="h-3.5 w-3.5" />
-                Capes
-              </button>
-            </div>
-          </div>
-        ) : (
-          <Timeline
-            sourceLabel={sourceLabel}
-            time={frame?.timestamp ?? null}
-            index={index}
-            count={frames.length}
-            onIndex={setIndex}
-            playing={playing}
-            onPlay={() => setPlaying((p) => !p)}
-            speed={speed}
-            onSpeed={setSpeed}
-            variable={legendVariable}
-            variableLabel={variableLabel}
-            onOpenLayers={() => setLayersOpen(true)}
-            times={frames.map((f) => f.timestamp)}
-            tabs={
-              mode === "obs" ? (
-                <div className="px-2 pb-1.5">
-                  <div role="radiogroup" aria-label="Observació" className="grid grid-cols-3 gap-1">
-                    {([
-                      ["stations", "Estacions"],
-                      ["radar", "Radar"],
-                      ["satellite", "Satèl·lit"],
-                    ] as const).map(([id, label]) => (
-                      <button
-                        key={id}
-                        type="button"
-                        role="radio"
-                        aria-checked={obsTab === id}
-                        onClick={() => setObsTab(id)}
-                        className="rounded-md border py-1 text-[11px] font-semibold"
-                        style={selectionStyle(obsTab === id)}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                  {obsTab === "satellite" && (
-                    <div role="radiogroup" aria-label="Imatge satèl·lit" className="mt-1 grid grid-cols-3 gap-1">
-                      {([
-                        ["color", "Color"],
-                        ["ir", "Infraroig"],
-                        ["vis", "Visible"],
-                      ] as const).map(([id, label]) => (
-                        <button
-                          key={id}
-                          type="button"
-                          role="radio"
-                          aria-checked={varSat === id}
-                          onClick={() => setVarSat(id)}
-                          className="rounded-md border py-1 text-[11px] font-semibold"
-                          style={selectionStyle(varSat === id)}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+        <Timeline
+          sourceLabel={sourceLabel}
+          time={frame?.timestamp ?? null}
+          index={index}
+          count={frames.length}
+          onIndex={setIndex}
+          playing={playing}
+          onPlay={() => setPlaying((p) => !p)}
+          speed={speed}
+          onSpeed={setSpeed}
+          variable={legendVariable}
+          variableLabel={variableLabel}
+          onOpenLayers={() => setLayersOpen(true)}
+          times={frames.map((f) => f.timestamp)}
+          timeText={
+            obsSatellite && varSat === "snow" && snowSelected
+              ? `${snowSelected.date.slice(8, 10)}/${snowSelected.date.slice(5, 7)}`
+              : undefined
+          }
+          extraLegend={
+            <OverlayLegends
+              snowCover={obsSatellite && varSat === "snow"}
+              avalancheRisk={options.avalancheRisk}
+              avalancheSlopes={options.avalancheSlopes}
+              snowEmpty={snowSelected?.empty ?? snowIndex?.empty}
+            />
+          }
+          tabs={
+            mode === "obs" ? (
+              <div className="px-2 pt-1.5 pb-1.5">
+                <div role="radiogroup" aria-label="Observació" className="grid grid-cols-3 gap-1">
+                  {([
+                    ["stations", "Estacions"],
+                    ["radar", "Radar"],
+                    ["satellite", "Satèl·lit"],
+                  ] as const).map(([id, label]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      role="radio"
+                      aria-checked={obsTab === id}
+                      onClick={() => setObsTab(id)}
+                      className="rounded-md border py-1 text-[11px] font-semibold"
+                      style={selectionStyle(obsTab === id)}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
-              ) : null
-            }
-          />
-        )}
+              </div>
+            ) : null
+          }
+        />
 
         <LayersPanel
           key={mode}
           open={layersOpen}
           onClose={() => setLayersOpen(false)}
           mode={mode}
+          satellite={obsSatellite}
+          satSource={satSource}
+          onSatSource={(id) => {
+            setSatSource(id);
+            setIndex(0);
+          }}
+          satView={varSat}
+          onSatView={setVarSat}
           model={mapModel}
           onModel={(id) => {
             setMapModel(id);
             setIndex(0);
           }}
           gridMode={gridMode}
-          groups={mountain || sourceKind === "sat" ? [] : groups}
+          groups={sourceKind === "sat" ? [] : groups}
           variable={variable ?? ""}
           onSelect={setVariableForSource}
           options={options}
           setOptions={setOptions}
           modelLabel={
-            mountain
-              ? "Muntanya · relleu i allaus ICGC"
-              : gridMode
-                ? `${modelLabel(mapModel)} · ${modelGrid?.source ?? "Open-Meteo"} (${modelGrid ? gridResolution(modelGrid) : "…"}°)`
-                : `${currentModel ?? "—"}${sourceKind === "arome" && arome ? ` · run ${arome.run_id.slice(9, 11)}Z` : ""}`
+            gridMode
+              ? `${modelLabel(mapModel)} · ${modelGrid?.source ?? "Open-Meteo"} (${modelGrid ? gridResolution(modelGrid) : "…"}°)`
+              : `${currentModel ?? "—"}${sourceKind === "arome" && arome ? ` · run ${arome.run_id.slice(9, 11)}Z` : ""}`
           }
           onRefresh={() => {
             if (gridMode) setModelGridTick((v) => v + 1);
             loadMaps();
-            if (obsTab === "satellite") setSat(null);
+            if (obsTab === "satellite") setSatTick((v) => v + 1);
           }}
         />
       </section>

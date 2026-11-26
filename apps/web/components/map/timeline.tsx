@@ -90,7 +90,7 @@ export function TimeSlider({
 
   return (
     <div className={className}>
-      <div className="relative pb-0.5">
+      <div className="relative pb-1">
         <div className="relative h-3.5">
           {ticks.map((tick) => {
             const pct = (tick.i / (count - 1)) * 100;
@@ -184,6 +184,8 @@ export function Timeline({
   tabs,
   leadingHref,
   times,
+  extraLegend,
+  timeText,
 }: {
   sourceLabel: string;
   time: string | null;
@@ -200,9 +202,11 @@ export function Timeline({
   tabs?: React.ReactNode;
   leadingHref?: { href: string; label: string };
   times?: string[];
+  extraLegend?: React.ReactNode;
+  timeText?: string;
 }) {
   const disabled = count <= 1;
-  const label = time ? frameShortLabel(time) : "—";
+  const label = timeText ?? (time ? frameShortLabel(time) : "—");
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 px-2 pb-[max(8px,env(safe-area-inset-bottom))] sm:px-3 sm:pb-3">
       <div
@@ -212,6 +216,7 @@ export function Timeline({
         <span className="sr-only" data-testid="map-source-label">
           {sourceLabel}
         </span>
+        {tabs}
         <div className="flex items-center justify-between gap-2 px-2 pb-1.5 pt-1.5 sm:flex-col sm:justify-center sm:gap-1 sm:px-2.5 sm:pb-2 sm:pt-2">
           <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
             {leadingHref && (
@@ -297,8 +302,12 @@ export function Timeline({
           </div>
         </div>
         {count > 1 && <TimeSlider times={times ?? []} index={index} count={count} onIndex={onIndex} />}
-        {tabs}
-        <Legend variable={variable} />
+        {extraLegend}
+        {variable && (
+          <div className="-mt-1">
+            <Legend variable={variable} />
+          </div>
+        )}
       </div>
     </div>
   );

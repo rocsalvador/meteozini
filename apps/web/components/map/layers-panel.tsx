@@ -1,12 +1,17 @@
 "use client";
 
 import {
+  Activity,
+  CloudHail,
   CloudRain,
+  CloudRainWind,
+  CloudSnow,
   Droplets,
   Eye,
   Gauge,
   Layers,
   RefreshCw,
+  Satellite,
   Snowflake,
   Thermometer,
   Wind,
@@ -29,7 +34,6 @@ export type MapOptions = {
   allow3d: boolean;
   avalancheSlopes: boolean;
   avalancheRisk: boolean;
-  snowCover: boolean;
   opacity: number;
 };
 
@@ -51,24 +55,56 @@ const WEATHER_SWITCHES: { key: keyof MapOptions; label: string }[] = [
   { key: "allow3d", label: "3D (relleu i inclinació)" },
 ];
 
-/** Mountain mode has no weather raster, so wind animation and value labels make no sense there. */
-const MOUNTAIN_SWITCHES = WEATHER_SWITCHES.filter((s) => s.key !== "windAnim" && s.key !== "values");
-
 export function variableIcon(variable: string) {
   if (variable.startsWith("temp")) return Thermometer;
   if (variable.startsWith("humidity")) return Droplets;
   if (variable.startsWith("wind") || variable === "temp_wind") return Gauge;
-  if (variable.startsWith("precip") || variable.startsWith("graupel") || variable.startsWith("radar")) return CloudRain;
+  if (variable === "precip_accum") return CloudRainWind;
+  if (variable === "snow_accum") return CloudSnow;
+  if (variable === "graupel") return CloudHail;
+  if (variable.startsWith("precip") || variable.startsWith("radar")) return CloudRain;
   if (variable.startsWith("snow")) return Snowflake;
   if (variable === "visibility") return Eye;
   if (variable === "cape") return Wind;
   return Layers;
 }
 
+export type SatView = "color" | "ir" | "vis" | "snow";
+
+/** Satellite sub-views, shared by the Configuració panel and the mobile icon rail. */
+export const SATELLITE_VIEWS: { id: SatView; label: string; icon: typeof Satellite }[] = [
+  { id: "color", label: "Color", icon: Satellite },
+  { id: "ir", label: "Infraroig", icon: Activity },
+  { id: "vis", label: "Visible", icon: Eye },
+  { id: "snow", label: "Neu al terra", icon: Snowflake },
+];
+
+/** Satellite providers. Meteosat stays live; Sentinel-2 is the high-resolution still. */
+export type SatSource = "mtg" | "s2";
+
+export const SATELLITE_SOURCES: { id: SatSource; label: string; detail: string }[] = [
+  { id: "mtg", label: "Meteosat", detail: "En directe · cada 10 min" },
+  { id: "s2", label: "Sentinel-2", detail: "Copernicus · 30 dies" },
+];
+
+/** Sub-views a provider can draw. Meteosat is the live weather satellite (colour/IR/VIS);
+ *  Sentinel-2 is Copernicus true colour, and the CLMS snow overlay is a Copernicus product too,
+ *  so it stays under Sentinel-2 rather than under Meteosat. */
+export function satelliteViews(source: SatSource) {
+  return source === "mtg"
+    ? SATELLITE_VIEWS.filter((v) => v.id !== "snow")
+    : SATELLITE_VIEWS.filter((v) => v.id === "color" || v.id === "snow");
+}
+
 export function LayersPanel({
   open,
   onClose,
   mode,
+  satellite,
+  satSource,
+  onSatSource,
+  satView,
+  onSatView,
   model,
   onModel,
   gridMode = false,
@@ -82,7 +118,13 @@ export function LayersPanel({
 }: {
   open: boolean;
   onClose: () => void;
-  mode: "models" | "obs" | "muntanya";
+  mode: "models" | "obs";
+  /** The satellite tab is open, so the panel offers the satellite/snow views. */
+  satellite: boolean;
+  satSource: SatSource;
+  onSatSource: (s: SatSource) => void;
+  satView: SatView;
+  onSatView: (v: SatView) => void;
   model: string;
   onModel: (id: string) => void;
   gridMode?: boolean;
@@ -96,12 +138,7 @@ export function LayersPanel({
 }) {
   if (!open) return null;
 
-  const mountain = mode === "muntanya";
-  const switches = mountain
-    ? MOUNTAIN_SWITCHES
-    : gridMode
-      ? WEATHER_SWITCHES.filter((item) => item.key !== "values")
-      : WEATHER_SWITCHES;
+  const switches = gridMode ? WEATHER_SWITCHES.filter((item) => item.key !== "values") : WEATHER_SWITCHES;
 
   const renderSwitch = ({ key, label }: { key: keyof MapOptions; label: string }) => {
     const on = Boolean(options[key] as boolean);
@@ -138,12 +175,12 @@ export function LayersPanel({
       />
       <aside
         role="dialog"
-        aria-label="Capes i vista del mapa"
+        aria-label="Configuració del mapa"
         className="absolute right-2 top-2 z-[61] flex max-h-[calc(100%-16px)] w-[min(360px,calc(100vw-16px))] flex-col overflow-hidden rounded-md border sm:right-3"
         style={{ backgroundColor: "var(--card)", borderColor: "var(--border)", color: "var(--card-foreground)" }}
       >
         <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: "var(--border)" }}>
-          <h2 className="text-base font-bold">Capes</h2>
+          <h2 className="text-base font-bold">Configuració</h2>
           <button
             type="button"
             onClick={onClose}
@@ -153,11 +190,6 @@ export function LayersPanel({
             <X className="h-4 w-4" />
           </button>
         </div>
-        {mountain && (
-          <div className="border-b px-4 py-2 text-[11px] leading-relaxed" style={{ borderColor: "var(--border)", color: "var(--muted-foreground)" }}>
-            Les capes de neu i allaus es controlen des de la llegenda del mapa.
-          </div>
-        )}
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
           {(
             <>
@@ -193,49 +225,103 @@ export function LayersPanel({
                 </section>
               )}
 
-              {mountain ? (
-                <p className="text-[11px] leading-relaxed" style={{ color: "var(--muted-foreground)" }}>
-                  La vista Muntanya no superposa cap capa meteorològica: només el relleu i els punts que triïs.
-                </p>
-              ) : (
-                groups.map((group) => (
-                  <section key={group.id}>
-                    <h3 className="mb-1.5 text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--muted-foreground)" }}>
-                      {group.label}
-                    </h3>
-                    <div role="radiogroup" aria-label={group.label} className="space-y-0.5">
-                      {group.variables.map((v) => {
-                        const meta = VAR_META[v];
-                        if (!meta) return null;
-                        const Icon = variableIcon(v);
-                        const checked = v === variable;
-                        return (
-                          <button
-                            key={v}
-                            type="button"
-                            role="radio"
-                            aria-checked={checked}
-                            onClick={() => onSelect(v)}
-                            className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13px] transition-colors hover:bg-black/5 dark:hover:bg-white/10"
-                            style={{
-                              backgroundColor: checked ? "var(--accent-soft)" : "transparent",
-                              fontWeight: checked ? 600 : 500,
-                            }}
-                          >
-                            <Icon className="h-4 w-4 shrink-0" style={{ color: checked ? "var(--accent)" : "var(--muted-foreground)" }} />
-                            <span className="min-w-0 flex-1 truncate">{meta.label}</span>
-                            {meta.unit && (
-                              <span className="shrink-0 font-mono text-[11px]" style={{ color: "var(--muted-foreground)" }}>
-                                {meta.unit}
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </section>
-                ))
+              {satellite && (
+                <section>
+                  <h3 className="mb-1.5 text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--muted-foreground)" }}>
+                    Font del satèl·lit
+                  </h3>
+                  <div role="radiogroup" aria-label="Font del satèl·lit" className="grid grid-cols-2 gap-1.5">
+                    {SATELLITE_SOURCES.map((src) => (
+                      <button
+                        key={src.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={satSource === src.id}
+                        onClick={() => onSatSource(src.id)}
+                        className="rounded-lg border px-2 py-1.5 text-left"
+                        style={selectionStyle(satSource === src.id)}
+                      >
+                        <span className="block text-[12px] font-semibold">{src.label}</span>
+                        <span
+                          className="block text-[10px]"
+                          style={{ color: satSource === src.id ? undefined : "var(--muted-foreground)" }}
+                        >
+                          {src.detail}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
               )}
+
+              {satellite && (
+                <section>
+                  <h3 className="mb-1.5 text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--muted-foreground)" }}>
+                    Imatge satèl·lit
+                  </h3>
+                  <div role="radiogroup" aria-label="Imatge satèl·lit i neu" className="grid grid-cols-2 gap-1.5">
+                    {satelliteViews(satSource).map((view) => {
+                      const Icon = view.icon;
+                      const checked = satView === view.id;
+                      return (
+                        <button
+                          key={view.id}
+                          type="button"
+                          role="radio"
+                          aria-checked={checked}
+                          onClick={() => onSatView(view.id)}
+                          className="flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[12px] font-semibold"
+                          style={selectionStyle(checked)}
+                        >
+                          <Icon
+                            className="h-3.5 w-3.5 shrink-0"
+                            style={{ color: checked ? "var(--accent-text)" : "var(--muted-foreground)" }}
+                          />
+                          <span className="truncate">{view.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
+
+              {groups.map((group) => (
+                <section key={group.id}>
+                  <h3 className="mb-1.5 text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--muted-foreground)" }}>
+                    {group.label}
+                  </h3>
+                  <div role="radiogroup" aria-label={group.label} className="space-y-0.5">
+                    {group.variables.map((v) => {
+                      const meta = VAR_META[v];
+                      if (!meta) return null;
+                      const Icon = variableIcon(v);
+                      const checked = v === variable;
+                      return (
+                        <button
+                          key={v}
+                          type="button"
+                          role="radio"
+                          aria-checked={checked}
+                          onClick={() => onSelect(v)}
+                          className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13px] transition-colors hover:bg-black/5 dark:hover:bg-white/10"
+                          style={{
+                            backgroundColor: checked ? "var(--accent-soft)" : "transparent",
+                            fontWeight: checked ? 600 : 500,
+                          }}
+                        >
+                          <Icon className="h-4 w-4 shrink-0" style={{ color: checked ? "var(--accent)" : "var(--muted-foreground)" }} />
+                          <span className="min-w-0 flex-1 truncate">{meta.label}</span>
+                          {meta.unit && (
+                            <span className="shrink-0 font-mono text-[11px]" style={{ color: "var(--muted-foreground)" }}>
+                              {meta.unit}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
 
               <section>
                 <h3 className="mb-1.5 text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--muted-foreground)" }}>
@@ -256,6 +342,13 @@ export function LayersPanel({
                     </button>
                   ))}
                 </div>
+                <p className="mt-2 mb-1 text-[10px] font-bold uppercase tracking-wider" style={{ color: "var(--muted-foreground)" }}>
+                  Sobreposició
+                </p>
+                <div className="space-y-1">
+                  {renderSwitch({ key: "avalancheSlopes", label: "Pendents d'allaus (ICGC)" })}
+                  {renderSwitch({ key: "avalancheRisk", label: "Zones de perill d'allaus (ICGC)" })}
+                </div>
               </section>
 
               <section>
@@ -264,24 +357,22 @@ export function LayersPanel({
                 </h3>
                 <div className="space-y-1">
                   {switches.map(renderSwitch)}
-                  {!mountain && (
-                    <label className="flex items-center gap-3 px-1 pt-2 text-[13px]">
-                      <span className="flex-1">Opacitat</span>
-                      <input
-                        type="range"
-                        min={10}
-                        max={100}
-                        value={Math.round(options.opacity * 100)}
-                        onChange={(e) => setOptions({ opacity: Number(e.target.value) / 100 })}
-                        aria-label="Opacitat"
-                        className="w-28 accent-[color:var(--accent)]"
-                        style={{ accentColor: "var(--accent)" }}
-                      />
-                      <span className="w-7 text-right font-mono text-[11px]" style={{ color: "var(--muted-foreground)" }}>
-                        {Math.round(options.opacity * 100)}
-                      </span>
-                    </label>
-                  )}
+                  <label className="flex items-center gap-3 px-1 pt-2 text-[13px]">
+                    <span className="flex-1">Opacitat</span>
+                    <input
+                      type="range"
+                      min={10}
+                      max={100}
+                      value={Math.round(options.opacity * 100)}
+                      onChange={(e) => setOptions({ opacity: Number(e.target.value) / 100 })}
+                      aria-label="Opacitat"
+                      className="w-28 accent-[color:var(--accent)]"
+                      style={{ accentColor: "var(--accent)" }}
+                    />
+                    <span className="w-7 text-right font-mono text-[11px]" style={{ color: "var(--muted-foreground)" }}>
+                      {Math.round(options.opacity * 100)}
+                    </span>
+                  </label>
                 </div>
               </section>
             </>

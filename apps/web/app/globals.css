@@ -106,7 +106,7 @@ h1, h2, h3, h4 { font-weight: 700; line-height: 1.5; }
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
-  height: 16px;
+  height: 13px;
   background: transparent;
   cursor: pointer;
 }
@@ -189,6 +189,10 @@ html.dark .maplibregl-ctrl-group button.maplibregl-ctrl-compass span {
 
 .maplibregl-ctrl-bottom-right { bottom: 96px !important; }
 .maplibregl-ctrl-bottom-left { bottom: 132px !important; }
+/* On phones the map-mode pill is nearly full width, so zoom/compass move below it. */
+@media (max-width: 480px) {
+  .maplibregl-ctrl-top-left { margin-top: 52px; }
+}
 @media (min-width: 640px) {
   .maplibregl-ctrl-bottom-right { bottom: 104px !important; }
   .maplibregl-ctrl-bottom-left { bottom: 0 !important; }
