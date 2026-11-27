@@ -55,9 +55,14 @@ import { Timeline } from "./timeline";
 import { OverlayLegends } from "@/components/mountain/overlay-legends";
 import { ForecastPanel, type WeatherData } from "./forecast-panel";
 
+// EOX publishes an annual cloudless Sentinel-2 mosaic (10 m, seam-free); the
+// newest year is the sharp Copernicus view, while /satellite keeps the last 30 days.
 const SATELLITE_TILE =
-  "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg";
+  "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/g/{z}/{y}/{x}.jpg";
 const DEM_TILE = "https://tiles.mapterhorn.com/{z}/{x}/{y}.webp";
+
+/** Coverage of the weather rasters (AROME/radar), also used as the clamp when no frame is loaded. */
+const RASTER_BOUNDS: Bounds = { west: -1, south: 39.8, east: 4.5, north: 43.5 };
 
 function baseStyle(theme: "light" | "dark"): StyleSpecification {
   return {
@@ -83,6 +88,7 @@ function baseStyle(theme: "light" | "dark"): StyleSpecification {
       dem: {
         type: "raster-dem",
         tiles: [DEM_TILE],
+        bounds: [RASTER_BOUNDS.west, RASTER_BOUNDS.south, RASTER_BOUNDS.east, RASTER_BOUNDS.north],
         encoding: "terrarium",
         tileSize: 512,
         maxzoom: 14,
@@ -92,6 +98,7 @@ function baseStyle(theme: "light" | "dark"): StyleSpecification {
       hillshade: {
         type: "raster-dem",
         tiles: [DEM_TILE],
+        bounds: [RASTER_BOUNDS.west, RASTER_BOUNDS.south, RASTER_BOUNDS.east, RASTER_BOUNDS.north],
         encoding: "terrarium",
         tileSize: 512,
         maxzoom: 12,
@@ -599,10 +606,10 @@ export default function MapApp() {
         type: "image",
         url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
         coordinates: [
-          [-1, 43.5],
-          [4.5, 43.5],
-          [4.5, 39.8],
-          [-1, 39.8],
+          [RASTER_BOUNDS.west, RASTER_BOUNDS.north],
+          [RASTER_BOUNDS.east, RASTER_BOUNDS.north],
+          [RASTER_BOUNDS.east, RASTER_BOUNDS.south],
+          [RASTER_BOUNDS.west, RASTER_BOUNDS.south],
         ],
       });
       instance.addLayer(
@@ -948,11 +955,11 @@ export default function MapApp() {
   }, []);
 
   // Never show unpainted areas: zoom-out stops when the raster still covers the
-  // viewport, and panning is confined to the raster bounds.
+  // viewport, and panning is confined to the raster bounds. Without a frame (API
+  // down) the same clamp applies over the default coverage so the map cannot drift.
   useEffect(() => {
-    if (!map || !frame) return;
-    const bounds = frame.web_bounds;
-    if (!bounds) return;
+    if (!map) return;
+    const bounds = frame?.web_bounds ?? RASTER_BOUNDS;
     const el = map.getContainer();
     map.setMaxBounds([
       [bounds.west, bounds.south],
@@ -1122,6 +1129,67 @@ export default function MapApp() {
     );
     return cleanup;
   }, [map, sourceKind, index, radar, options.opacity]);
+
+  // Sentinel-2 tiles published by the pipeline: the detail follows the zoom, unlike
+  // the single wx-image frame the live CDSE fallback draws.
+  useEffect(() => {
+    if (!map) return;
+    const sourceId = "s2-tiles";
+    const layerId = "s2-layer";
+    const tiles = sat?.tiles ? `${window.location.origin}${sat.tiles}` : null;
+    const wanted = sourceKind === "sat" && satSource === "s2" && varSat === "color" && Boolean(tiles);
+    const cleanup = () => {
+      if (map.getLayer(layerId)) map.removeLayer(layerId);
+      if (map.getSource(sourceId)) map.removeSource(sourceId);
+    };
+    const apply = () => {
+      cleanup();
+      if (!wanted) return;
+      map.addSource(sourceId, {
+        type: "raster",
+        tiles: [tiles!],
+        tileSize: sat?.tile_size ?? 512,
+        minzoom: sat?.minzoom ?? 0,
+        maxzoom: sat?.maxzoom ?? 11,
+        attribution: "Sentinel-2 © Copernicus",
+      });
+      const before = PLACE_LAYER_IDS.find((id) => map.getLayer(id));
+      // Same zoom fade as the weather raster: the deepest tiles are upscaled, so
+      // letting the relief and roads back through keeps the map readable.
+      const basemapFactor = options.basemap === "topo" ? 0.6 : 1;
+      const fade = (factor: number) => options.opacity * factor * basemapFactor;
+      map.addLayer(
+        {
+          id: layerId,
+          type: "raster",
+          source: sourceId,
+          paint: {
+            "raster-opacity": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              9,
+              fade(1),
+              12,
+              fade(0.9),
+              14,
+              fade(0.6),
+              16,
+              fade(0.32),
+            ],
+            "raster-fade-duration": 0,
+          },
+        },
+        before
+      );
+    };
+    if (map.isStyleLoaded()) apply();
+    else map.once("load", apply);
+    return () => {
+      map.off("load", apply);
+      cleanup();
+    };
+  }, [map, sourceKind, satSource, varSat, sat, options.opacity, options.basemap]);
 
   // ICGC avalanche slope classification (WMS raster, CORS-enabled upstream).
   useEffect(() => {

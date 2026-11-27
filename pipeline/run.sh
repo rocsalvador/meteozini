@@ -43,3 +43,12 @@ if [ -n "$FORCE" ]; then
 else
   pipeline/.venv/bin/python pipeline/fetch_snow.py || echo "warn: snow overlay not updated"
 fi
+
+# Sentinel-2 mosaic tiles. It exits immediately unless STAC reports an acquisition
+# newer than the published run, which is what keeps the CDSE processing-unit quota
+# (10 000/month) intact when this script runs every few minutes.
+if [ -n "$FORCE" ]; then
+  pipeline/.venv/bin/python pipeline/fetch_s2.py --force || echo "warn: Sentinel-2 mosaic not updated"
+else
+  pipeline/.venv/bin/python pipeline/fetch_s2.py || echo "warn: Sentinel-2 mosaic not updated"
+fi

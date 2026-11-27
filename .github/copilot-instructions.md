@@ -17,8 +17,10 @@ npm run start               # serve the web production build
 ./pipeline/run.sh --limit 6 # fast pipeline smoke run
 ./pipeline/run.sh --force   # rebuild even if the current run is already published
 python3 pipeline/fetch_comarques.py   # apps/web/public/comarques.geojson (ICGC WFS)
+python3 pipeline/fetch_coastline.py   # apps/web/public/coastline.geojson (Overpass, OSM coastline)
 python3 pipeline/fetch_peaks.py       # apps/web/public/peaks.geojson (Overpass)
 pipeline/.venv/bin/python pipeline/fetch_snow.py   # CLMS daily snow overlay (needs CDSE OAuth, see .env.example)
+pipeline/.venv/bin/python pipeline/fetch_s2.py     # Sentinel-2 mosaic tiles for data/up/static/s2 (same CDSE OAuth)
 ```
 
 Set `API_BASE_URL` (default `http://localhost:8787`) for the web rewrites and `MZ_DATA_DIR`
@@ -56,7 +58,8 @@ The repo is an npm-workspaces monorepo with a strict data/UI split:
 - `pipeline/` regenerates the AROME products into `data/up` (gitignored, ~800 MB). `build_arome.py`
   compares the newest data.gouv run with the current catalogue and exits without downloading
   when that run is already built (override with `--force`). The API's `/v1/static/*` serves that
-  directory; `fetch_comarques.py`/`fetch_peaks.py` write their GeoJSON into `apps/web/public/`.
+  directory; `fetch_comarques.py`/`fetch_coastline.py`/`fetch_peaks.py` write their GeoJSON into
+  `apps/web/public/`.
 - `pipeline/fetch_snow.py` writes the daily Copernicus CLMS snow overlay
   (`data/up/static/snow/<product>-<date>.png` + `index.json`, read by
   `/v1/api/mountain/snow`). It uses the CLMS BYOC collections on the Copernicus Data Space
@@ -64,6 +67,14 @@ The repo is an npm-workspaces monorepo with a strict data/UI split:
   (template in `.env.example`; `run.sh` sources it). Default product is GFSC 60 m gap-filled;
   `--product sce` uses the 500 m SCE. The SCE band arrives with a **+100 offset** (100 = 0 %,
   200 = 100 %, 255 = no data). The step is best-effort: a CDSE failure must not break AROME/IFS.
+- `pipeline/fetch_s2.py` writes the recent Sentinel-2 mosaic as WebP tiles under
+  `data/up/static/s2`: a 10-day window rendered as 3x3 Process API frames (~89 m/px), composited
+  newest-first with SCL cloud masking, cut into z8-z10 tiles, with `index.json` read by
+  `/v1/api/satellite/frames?source=s2`. The free CDSE quota is 10 000 requests and 10 000
+  processing units per month and one 2500 px frame is ~22 PU, so the step is gated on a free STAC
+  query and on the day frames already on disk — never refetch on a timer. A single Process API
+  response is capped at 2500x2500 px, and per-tile requests would each pick their own scene and
+  show date seams, which is why the mosaic is composited here and not on demand.
 - Map UI pieces: `components/map/layers-panel.tsx` (owns the `MapOptions` type),
   `timeline.tsx` (playback + Windy-style time slider + legend; its `TimeSlider` is also used by
   `/mapes`), `forecast-panel.tsx`,

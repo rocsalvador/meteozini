@@ -28,6 +28,11 @@ export type MapsResponse = {
 
 export type SatFrames = {
   bounds: Bounds;
+  /** Raster tile template (with {z}/{x}/{y}) when the source is pre-rendered tiles. */
+  tiles?: string | null;
+  minzoom?: number;
+  maxzoom?: number;
+  tile_size?: number;
   layers: Record<string, { slot: number; time: string; url: string }[]>;
 };
 

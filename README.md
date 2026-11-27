@@ -44,8 +44,24 @@ Secrets live in the gitignored root `.env` (template: `.env.example`); the API l
 itself when `CDSE_CLIENT_ID` is not already exported.
 
 The satellite tab of the map has a source selector: Meteosat (live, 10-minute frames, EUMETSAT)
-or Sentinel-2 (Copernicus, a 30-day mosaic served through the CDSE process API). Without CDSE
-credentials the Sentinel-2 source reports an empty frame set, so nothing is drawn.
+or Sentinel-2 (Copernicus). Without CDSE credentials the Sentinel-2 source reports an empty frame
+set, so nothing is drawn.
+
+Sentinel-2 comes from `pipeline/fetch_s2.py`, which writes WebP tiles to `data/up/static/s2`:
+each day of a 10-day window is rendered as `--grid` x `--grid` Process API frames (default 3x3,
+~89 m per pixel), the days are composited newest-first with the SCL scene classification masking
+clouds, and the result is cut into z8-z10 tiles. Asking the API for the SE view on demand cannot
+be both sharp and seamless — one response is capped at 2500x2500 px, and per-tile requests each
+pick their own least-cloudy scene — which is why the mosaic is built here instead. When no index
+exists (fresh checkout) the API falls back to a live single frame (`/v1/api/satellite/image`).
+
+The free CDSE account allows 10 000 Sentinel Hub requests and 10 000 processing units per month,
+and one 2500 px frame costs ~22 PU, so the step must not refetch on a timer: it queries STAC
+(free), exits unless an acquisition is newer than the published run, and keeps every day frame on
+disk so a rebuild only pays for the days that appeared since. That is what makes it safe to run
+`./pipeline/run.sh` every few minutes. The sharp all-year Copernicus view is still the
+«Satèl·lit» basemap (EOX annual cloudless mosaic); the tile mosaic is the recent one, and in
+cloudy months it keeps transparent holes where no recent pass was clear.
 
 Basemap data: © OpenStreetMap · © OpenFreeMap · Límits © ICGC; relief © Mapterhorn; topo
 © OpenTopoMap (CC-BY-SA). Weather data from Open-Meteo, Météo-France (AROME), Meteocat/XEMA,
