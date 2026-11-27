@@ -2,7 +2,7 @@
 
 Self-hosted, weather site for Catalonia.
 
-Next.js 15 · React 19 · TypeScript · Tailwind · MapLibre GL 5 · Hono · Python pipeline.
+Next.js 16 · React 19 · TypeScript · Tailwind · MapLibre GL 6 · Hono · Python pipeline.
 
 ## Quick start
 

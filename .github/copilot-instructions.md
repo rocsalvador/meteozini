@@ -1,7 +1,7 @@
 # Copilot instructions for meteozini
 
-Catalan-language, self-hosted weather site for Catalonia (Next.js 15 + React 19 + TypeScript +
-Tailwind + MapLibre GL 5). All weather map products are generated locally by `pipeline/` and
+Catalan-language, self-hosted weather site for Catalonia (Next.js 16 + React 19 + TypeScript +
+Tailwind + MapLibre GL 6). All weather map products are generated locally by `pipeline/` and
 served from `data/up/`; there is **no dependency on any third-party Catalan weather site**.
 
 ## Commands
@@ -37,7 +37,7 @@ The repo is an npm-workspaces monorepo with a strict data/UI split:
   `/v1/api/*` (JSON) and `/v1/static/*` (PNG overlays, value grids, wind fields),
   with CORS enabled so a mobile app can consume them directly. Reads `data/up`
   via `MZ_DATA_DIR`. Per-route TTL caching lives in `src/cache.ts`.
-- `apps/web` (`@meteozini/web`, Next.js 15) is **layer 2**: a pure client of the
+- `apps/web` (`@meteozini/web`, Next.js 16) is **layer 2**: a pure client of the
   API. `app/page.tsx` → interactive map (`components/map/map-app.tsx`, wrapped in
   `<Suspense>` because it uses `useSearchParams`); `app/mapes`, `app/models`,
   `app/clima`, `app/lloc`, `app/muntanya`, `app/privadesa`, `app/cookies` are the pages.
@@ -149,10 +149,15 @@ The repo is an npm-workspaces monorepo with a strict data/UI split:
 ## Pitfalls
 
 - Files added to `apps/web/public/` after `npm run build` return 404 until the app is rebuilt.
-- MapLibre GL v5 resolves custom tile protocols inside its worker, so main-thread `addProtocol`
+- MapLibre GL resolves custom tile protocols inside its worker, so main-thread `addProtocol`
   is insufficient for vector sources; the `maplibre-contour` approach was removed because of
   this. Contour lines come from the OpenTopoMap basemap — do not reintroduce a half-working
   vector contour layer.
+- MapLibre GL v6 is ESM-only with no default export and derives its worker URL from
+  `import.meta.url`, which Turbopack resolves to the module path on disk. Import the map
+  components' `maplibre-gl` symbols from `apps/web/lib/maplibre.ts`, which calls
+  `setWorkerUrl()` with the bundled worker asset; importing `maplibre-gl` directly breaks
+  vector tiles with "Worker failed to load".
 - Next's data cache refuses upstream bodies > 2 MB (ERA5, some EUMETSAT images) and logs
   warnings; keep using module-level caches/explicit headers as the existing routes do.
 - `data/up/` is gitignored: a fresh checkout must run `./pipeline/run.sh` before the map has

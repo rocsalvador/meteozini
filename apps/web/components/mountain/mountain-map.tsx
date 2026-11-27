@@ -1,6 +1,7 @@
 "use client";
 
-import maplibregl, { type Map as MapLibreMap, type StyleSpecification } from "maplibre-gl";
+import * as maplibregl from "@/lib/maplibre";
+import type { Map as MapLibreMap, StyleSpecification } from "@/lib/maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef, useState } from "react";
 import { dangerMeta, icgcWmsTileUrl, padBounds, trackBounds } from "@meteozini/core";
