@@ -9,6 +9,10 @@ if [ -f .env ]; then
   set +a
 fi
 
+if [ ! -f apps/web/public/coastline.geojson ]; then
+  pipeline/.venv/bin/python pipeline/fetch_coastline.py
+fi
+
 # `--limit`, `--run` and `--force` are AROME-specific smoke/override modes; only
 # rebuild IFS in the normal path (and pass --force through when requested).
 FORCE=""
