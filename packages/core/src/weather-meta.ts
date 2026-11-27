@@ -100,11 +100,6 @@ export const VAR_META: Record<string, VariableMeta> = {
   sst_anomaly: { label: "Anomalia de la temperatura del mar", shortLabel: "Anom. mar", unit: "°C", legend: ANOMALY_LEGEND, stops: ["-4", "-2", "0", "+2", "+4"] },
   snow_level_min: { label: "Cota mínima", shortLabel: "Cota min", unit: "m", legend: SNOW_LEVEL_LEGEND, stops: ["0", "600", "1200", "1800", "2500", "3500+"] },
   radar_rate: { label: "Intensitat de precipitació", shortLabel: "Intensitat", unit: "mm/h", legend: RAIN_LEGEND, stops: RAIN_STOPS },
-  radar_cmax: { label: "Reflectivitat màxima", shortLabel: "Màxima", unit: "dBZ", legend: "linear-gradient(90deg,#9be7f5 0%,#04e9e7 15.4%,#019ff4 23.1%,#0300f4 30.8%,#02fd02 38.5%,#01c501 46.2%,#fefe00 53.8%,#ffc400 61.5%,#ff9100 69.2%,#ff0000 76.9%,#d40000 84.6%,#bc0000 92.3%,#f800fd 100%)", stops: ["5", "20", "35", "50", "65", "75"] },
-  radar_ptype: { label: "Tipus de precipitació", shortLabel: "Tipus", unit: "", legend: PTYPE_LEGEND, stops: ["Pluja", "Aiguaneu", "Neu", "Gelant", "Calamarsa"], categorical: true },
-  radar_vel_esgld: { label: "Velocitat radial · Gelida", shortLabel: "Gelida", unit: "m/s", legend: "linear-gradient(90deg,#00441b 0%,#006d2c 13.3%,#238b45 26.7%,#41ab5d 40%,#74c476 53.3%,#c7e9c0 66.7%,#d9d9d9 73.3%,#fcbba1 80%,#ef3b2c 86.7%,#a50f15 93.3%,#67000d 100%)", stops: ["-40", "-18", "-4", "4", "18", "+40"] },
-  radar_vel_espdg: { label: "Velocitat radial · Saragossa", shortLabel: "Saragossa", unit: "m/s", legend: "linear-gradient(90deg,#00441b 0%,#006d2c 13.3%,#238b45 26.7%,#41ab5d 40%,#74c476 53.3%,#c7e9c0 66.7%,#d9d9d9 73.3%,#fcbba1 80%,#ef3b2c 86.7%,#a50f15 93.3%,#67000d 100%)", stops: ["-40", "-18", "-4", "4", "18", "+40"] },
-  radar_vel_fropo: { label: "Velocitat radial · Opoul", shortLabel: "Opoul", unit: "m/s", legend: "linear-gradient(90deg,#00441b 0%,#006d2c 13.3%,#238b45 26.7%,#41ab5d 40%,#74c476 53.3%,#c7e9c0 66.7%,#d9d9d9 73.3%,#fcbba1 80%,#ef3b2c 86.7%,#a50f15 93.3%,#67000d 100%)", stops: ["-40", "-18", "-4", "4", "18", "+40"] },
 };
 
 export const AROME_GROUPS = [
@@ -120,9 +115,11 @@ export const OBS_GROUPS = [
   { id: "sea", label: "Mar · última nit", variables: ["sst", "sst_anomaly"] },
 ];
 
+/** RainViewer only publishes the precipitation-rate composite, so intensity is the
+ *  one radar product with frames behind it; ptype, reflectivity and radial velocity
+ *  have no source and would leave the time slider empty. */
 export const RADAR_GROUPS = [
-  { id: "radar", label: "Radar", variables: ["radar_rate", "radar_ptype", "radar_cmax"] },
-  { id: "radar_velocity", label: "Velocitat radial", variables: ["radar_vel_esgld", "radar_vel_espdg", "radar_vel_fropo"] },
+  { id: "radar", label: "Radar", variables: ["radar_rate"] },
 ];
 
 export const AROME_LABELS: Record<string, string> = {
@@ -171,11 +168,6 @@ export const OBS_LABELS: Record<string, string> = {
 
 export const RADAR_LABELS: Record<string, string> = {
   radar_rate: "Intensitat de precipitació",
-  radar_cmax: "Reflectivitat màxima",
-  radar_ptype: "Tipus de precipitació",
-  radar_vel_esgld: "Velocitat radial · Gelida",
-  radar_vel_espdg: "Velocitat radial · Saragossa",
-  radar_vel_fropo: "Velocitat radial · Opoul",
 };
 
 const COMPASS = ["Tramuntana", "Gregal", "Llevant", "Xaloc", "Migjorn", "Llebeig", "Ponent", "Mestral"];
@@ -231,7 +223,6 @@ export function compactValue(variable: string, value: number | null | undefined)
     case "graupel":
       return value < 0.1 ? "" : value.toFixed(1);
     case "precipitation_type":
-    case "radar_ptype":
       return "";
     case "wind_speed":
     case "wind_gust":
@@ -245,7 +236,7 @@ export function compactValue(variable: string, value: number | null | undefined)
 export function formatValue(variable: string, value: number | null | undefined, unit?: string): string {
   if (value == null || !Number.isFinite(value)) return "—";
   if (variable === "snow_depth") return `${Math.round(100 * value)} cm`;
-  if (variable === "precipitation_type" || variable === "radar_ptype") {
+  if (variable === "precipitation_type") {
     const names = ["Pluja feble", "Pluja moderada", "Pluja forta", "Xàfec", "Aiguaneu feble", "Aiguaneu forta", "Neu feble", "Neu moderada", "Neu forta", "Pluja gelant", "Calamarsa"];
     return names[Math.round(value)] ?? "—";
   }
@@ -254,7 +245,7 @@ export function formatValue(variable: string, value: number | null | undefined, 
   }
   const decimals = [
     "temperature", "temp_max", "temp_min", "precipitation", "precip_accum", "precip_daily",
-    "snow_precipitation", "snow_accum", "pressure_msl", "radar_rate", "radar_ptype", "graupel", "sst",
+    "snow_precipitation", "snow_accum", "pressure_msl", "radar_rate", "graupel", "sst",
     "sst_anomaly", "temp_max_anomaly", "temp_min_anomaly",
   ].includes(variable)
     ? 1

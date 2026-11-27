@@ -1621,11 +1621,7 @@ export default function MapApp() {
   };
 
   const legendVariable =
-    sourceKind === "sat" || sourceKind === "obs"
-      ? null
-      : sourceKind === "radar" && (varRadar.startsWith("radar_vel") || varRadar === "radar_ptype" || varRadar === "radar_cmax")
-        ? varRadar
-        : variable;
+    sourceKind === "sat" || sourceKind === "obs" ? null : variable;
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
